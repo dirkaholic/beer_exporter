@@ -2,11 +2,13 @@
 package main
 
 import (
-	"flag"
+	"database/sql"
+	"fmt"
 	"log"
 	"net/http"
 
-	"github.com/joho/godotenv"
+	"github.com/kelseyhightower/envconfig"
+	_ "github.com/lib/pq"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -14,13 +16,6 @@ import (
 const namespace = "beer"
 
 var (
-	listenAddress = flag.String("web.listen-address", ":9141",
-		"Address to listen on for telemetry")
-	metricsPath = flag.String("web.telemetry-path", "/metrics",
-		"Path under which to expose metrics")
-	configPath = flag.String("config.file-path", "",
-		"Path to environment file")
-
 	// Metrics
 	up = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "up"),
@@ -38,7 +33,7 @@ var (
 type BeerExporter struct {
 }
 
-func NewExporter() *BeerExporter {
+func NewBeerExporter() *BeerExporter {
 	return &BeerExporter{}
 }
 
@@ -63,35 +58,52 @@ func (e *BeerExporter) UpdateMetrics(ch chan<- prometheus.Metric) {
 	log.Println("Endpoint scraped")
 }
 
-func main() {
-	flag.Parse()
+const createPersons string = `
+CREATE TABLE IF NOT EXISTS persons (
+	username varchar(32) NOT NULL,
+	fullname varchar(256) NOT NULL,
+	PRIMARY KEY (username)
+  );`
 
-	configFile := *configPath
-	if configFile != "" {
-		log.Printf("Loading %s env file.\n", configFile)
-		err := godotenv.Load(configFile)
-		if err != nil {
-			log.Printf("Error loading %s env file.\n", configFile)
-		}
-	} else {
-		err := godotenv.Load()
-		if err != nil {
-			log.Println("Error loading .env file, assume env variables are set.")
-		}
+func main() {
+	var c Config
+	err := envconfig.Process("beer", &c)
+	if err != nil {
+		log.Fatal(err.Error())
 	}
 
-	exporter := NewExporter()
+	connStr := fmt.Sprintf("postgresql://%s:%s@%s/%s",
+		c.DbUser,
+		c.DbPassword,
+		c.DbHost,
+		c.DbDatabase,
+	)
+
+	// Connect to database
+	db, err := sql.Open("postgres", connStr)
+	if err != nil {
+		log.Fatal(err)
+	} else {
+		log.Println("Successfully connected to database.")
+	}
+
+	_, execErr := db.Exec(createPersons)
+	if execErr != nil {
+		log.Fatalf("An error occured while executing query: %v", execErr)
+	}
+
+	exporter := NewBeerExporter()
 	prometheus.MustRegister(exporter)
 
-	http.Handle(*metricsPath, promhttp.Handler())
+	http.Handle(c.AppMetricsPath, promhttp.Handler())
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`<html>
              <head><title>Beer Exporter</title></head>
              <body>
              <h1>Beer Exporter</h1>
-             <p><a href='` + *metricsPath + `'>Metrics</a></p>
+             <p><a href='` + c.AppMetricsPath + `'>Metrics</a></p>
              </body>
              </html>`))
 	})
-	log.Fatal(http.ListenAndServe(*listenAddress, nil))
+	log.Fatal(http.ListenAndServe(c.AppListenAddress, nil))
 }
