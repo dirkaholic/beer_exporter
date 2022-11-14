@@ -55,6 +55,18 @@ func (e *BeerExporter) UpdateMetrics(ch chan<- prometheus.Metric) {
 		beersConsumed, prometheus.GaugeValue, float64(2), "schwarzbier", "mike",
 	)
 
+	ch <- prometheus.MustNewConstMetric(
+		beersConsumed, prometheus.GaugeValue, float64(3), "winterbock", "monika",
+	)
+
+	ch <- prometheus.MustNewConstMetric(
+		beersConsumed, prometheus.GaugeValue, float64(1), "pils", "kai",
+	)
+
+	ch <- prometheus.MustNewConstMetric(
+		beersConsumed, prometheus.GaugeValue, float64(10), "guiness", "dirk",
+	)
+
 	log.Println("Endpoint scraped")
 }
 
